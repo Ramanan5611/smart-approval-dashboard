@@ -19,12 +19,13 @@ app.use(express.json());
 const connectDB = async () => {
   try {
     console.log('Attempting to connect to MongoDB...');
-    const conn = await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/smart-approval-dashboard');
+    const conn = await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/smart-approval-dashboard', {
+      dbName: 'smart-approval-dashboard'
+    });
     console.log(`MongoDB Connected: ${conn.connection.host}`);
     console.log(`Database Name: ${conn.connection.name}`);
   } catch (error) {
     console.error('MongoDB connection error:', error);
-    // Log more details if available
     if (error.reason) console.error('Connection reason:', error.reason);
     process.exit(1);
   }
@@ -143,7 +144,10 @@ const Appointment = mongoose.model('Appointment', AppointmentSchema);
 
 const seedAdmin = async () => {
   try {
-    console.log('Checking for existing admin user...');
+    console.log(`Checking database state in ${mongoose.connection.name}...`);
+    const userCount = await User.countDocuments();
+    console.log(`Total users found: ${userCount}`);
+    
     const adminExists = await User.findOne({ role: 'ADMIN' });
     if (!adminExists) {
       console.log('No admin found. Seeding default admin...');
@@ -156,7 +160,7 @@ const seedAdmin = async () => {
       await admin.save();
       console.log('✅ Default admin account created successfully!');
     } else {
-      console.log('Admin user already exists. Skipping seed.');
+      console.log(`Admin user (${adminExists.username}) already exists. Skipping seed.`);
     }
   } catch (error) {
     console.error('CRITICAL: Error seeding admin:', error.message);
