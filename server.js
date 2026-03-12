@@ -194,13 +194,28 @@ const authenticateToken = (req, res, next) => {
 // Routes
 
 // Health check
-app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    db: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
-    dbName: mongoose.connection.name,
-    timestamp: new Date().toISOString() 
-  });
+app.get('/api/health', async (req, res) => {
+  try {
+    const userCount = await User.countDocuments();
+    const requestCount = await Request.countDocuments();
+    res.json({ 
+      status: 'OK', 
+      db: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
+      dbName: mongoose.connection.name,
+      dbHost: mongoose.connection.host,
+      counts: {
+        users: userCount,
+        requests: requestCount
+      },
+      timestamp: new Date().toISOString() 
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      status: 'Error', 
+      error: error.message,
+      db: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'
+    });
+  }
 });
 
 // Auth routes
