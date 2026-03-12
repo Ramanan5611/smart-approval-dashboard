@@ -137,6 +137,24 @@ AppointmentSchema.set('toJSON', {
 
 const Appointment = mongoose.model('Appointment', AppointmentSchema);
 
+const seedAdmin = async () => {
+  try {
+    const adminExists = await User.findOne({ role: 'ADMIN' });
+    if (!adminExists) {
+      const admin = new User({
+        username: 'admin@smartapproval.com',
+        password: 'admin123',
+        role: 'ADMIN',
+        name: 'System Admin'
+      });
+      await admin.save();
+      console.log('Default admin account created: admin@smartapproval.com / admin123');
+    }
+  } catch (error) {
+    console.error('Error seeding admin:', error);
+  }
+};
+
 // JWT Token generation
 const generateToken = (userId) => {
   return jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn: '24h' });
@@ -271,6 +289,12 @@ app.get('/api/requests', authenticateToken, async (req, res) => {
       case 'DEAN':
         requests = await Request.find({ 
           currentStage: 'DEAN_APPROVAL', 
+          status: 'PENDING' 
+        }).sort({ createdAt: -1 });
+        break;
+      case 'STUDENT_AFFAIRS':
+        requests = await Request.find({ 
+          currentStage: { $in: ['STUDENT_AFFAIRS_APPROVAL', 'DEAN_APPROVAL'] }, 
           status: 'PENDING' 
         }).sort({ createdAt: -1 });
         break;
@@ -545,6 +569,19 @@ app.post('/api/users/:id/reset-password', authenticateToken, async (req, res) =>
   }
 });
 
+// Approvers route
+app.get('/api/approvers', authenticateToken, async (req, res) => {
+  try {
+    const approvers = await User.find({ 
+      role: { $in: ['FACULTY', 'HOD', 'DEAN', 'ADMIN'] } 
+    }).select('name role username');
+    res.json(approvers);
+  } catch (error) {
+    console.error('Get approvers error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Appointment routes
 app.get('/api/appointments', authenticateToken, async (req, res) => {
   try {
@@ -615,6 +652,7 @@ app.use((err, req, res, next) => {
 const startServer = async () => {
   try {
     await connectDB();
+    await seedAdmin();
     app.listen(PORT, () => {
       console.log(`Server is running on port ${PORT}`);
       console.log(`API endpoints:`);
