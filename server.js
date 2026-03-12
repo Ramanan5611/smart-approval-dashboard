@@ -30,7 +30,7 @@ const connectDB = async () => {
 const UserSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true },
   password: { type: String, required: true },
-  role: { type: String, required: true, enum: ['STUDENT', 'FACULTY', 'HOD', 'DEAN', 'ADMIN'] },
+  role: { type: String, required: true, enum: ['STUDENT', 'FACULTY', 'HOD', 'DEAN', 'ADMIN', 'STUDENT_AFFAIRS'] },
   name: { type: String, required: true }
 }, { timestamps: true });
 
@@ -231,8 +231,15 @@ app.post('/api/auth/register', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Registration error:', error);
-    res.status(500).json({ message: 'Server error' });
+    console.error('Registration error details:', {
+      message: error.message,
+      stack: error.stack,
+      body: req.body // Log the body to see what role/data caused the failure
+    });
+    res.status(500).json({ 
+      message: 'Server error during registration',
+      details: error.message 
+    });
   }
 });
 
