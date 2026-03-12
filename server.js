@@ -18,10 +18,14 @@ app.use(express.json());
 // MongoDB connection
 const connectDB = async () => {
   try {
-    await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/smart-approval-dashboard');
-    console.log(`MongoDB Connected`);
+    console.log('Attempting to connect to MongoDB...');
+    const conn = await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/smart-approval-dashboard');
+    console.log(`MongoDB Connected: ${conn.connection.host}`);
+    console.log(`Database Name: ${conn.connection.name}`);
   } catch (error) {
     console.error('MongoDB connection error:', error);
+    // Log more details if available
+    if (error.reason) console.error('Connection reason:', error.reason);
     process.exit(1);
   }
 };
@@ -139,8 +143,10 @@ const Appointment = mongoose.model('Appointment', AppointmentSchema);
 
 const seedAdmin = async () => {
   try {
+    console.log('Checking for existing admin user...');
     const adminExists = await User.findOne({ role: 'ADMIN' });
     if (!adminExists) {
+      console.log('No admin found. Seeding default admin...');
       const admin = new User({
         username: 'admin@smartapproval.com',
         password: 'admin123',
@@ -148,10 +154,13 @@ const seedAdmin = async () => {
         name: 'System Admin'
       });
       await admin.save();
-      console.log('Default admin account created: admin@smartapproval.com / admin123');
+      console.log('✅ Default admin account created successfully!');
+    } else {
+      console.log('Admin user already exists. Skipping seed.');
     }
   } catch (error) {
-    console.error('Error seeding admin:', error);
+    console.error('CRITICAL: Error seeding admin:', error.message);
+    console.error(error.stack);
   }
 };
 
@@ -182,7 +191,12 @@ const authenticateToken = (req, res, next) => {
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
+  res.json({ 
+    status: 'OK', 
+    db: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
+    dbName: mongoose.connection.name,
+    timestamp: new Date().toISOString() 
+  });
 });
 
 // Auth routes
