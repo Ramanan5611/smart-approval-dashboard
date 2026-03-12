@@ -65,7 +65,7 @@ const RequestSchema = new mongoose.Schema({
   studentName: { type: String, required: true },
   title: { type: String, required: true },
   description: { type: String, required: true },
-  currentStage: { type: String, required: true, enum: ['SUBMITTED', 'FACULTY_REVIEW', 'HOD_REVIEW', 'DEAN_APPROVAL', 'COMPLETED'] },
+  currentStage: { type: String, required: true, enum: ['SUBMITTED', 'FACULTY_REVIEW', 'HOD_REVIEW', 'DEAN_APPROVAL', 'STUDENT_AFFAIRS_APPROVAL', 'COMPLETED'] },
   status: { type: String, required: true, enum: ['PENDING', 'APPROVED', 'REJECTED'] },
   logs: [LogEntrySchema],
   complianceScore: { type: Number, min: 0, max: 100 },
@@ -215,6 +215,41 @@ app.get('/api/health', async (req, res) => {
       error: error.message,
       db: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'
     });
+  }
+});
+
+// Diagnostic: Check all collections
+app.get('/api/admin/check-db', async (req, res) => {
+  try {
+    const collections = await mongoose.connection.db.listCollections().toArray();
+    const stats = {};
+    for (const col of collections) {
+      stats[col.name] = await mongoose.connection.db.collection(col.name).countDocuments();
+    }
+    res.json({
+      database: mongoose.connection.name,
+      collections: stats,
+      readyState: mongoose.connection.readyState
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Diagnostic: Force Seed
+app.get('/api/admin/force-seed', async (req, res) => {
+  try {
+    console.log('MANUAL SEED TRIGGERED');
+    const newUser = new User({
+      username: `admin_${Date.now()}@test.com`,
+      password: 'managed_password_123',
+      role: 'ADMIN',
+      name: 'Diagnostic Admin'
+    });
+    await newUser.save();
+    res.json({ message: 'Diagnostic user created!', user: newUser.username });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
