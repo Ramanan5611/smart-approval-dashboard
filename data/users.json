@@ -1,0 +1,51 @@
+[
+  {
+    "id": "u1",
+    "username": "student@smartapproval.com",
+    "password": "stud123",
+    "role": "STUDENT",
+    "name": "Alice Student"
+  },
+  {
+    "id": "u2",
+    "username": "ramanandai482@gmail.com",
+    "password": "fac123",
+    "role": "FACULTY",
+    "name": "Dr.S.darshan"
+  },
+  {
+    "id": "u3",
+    "username": "hod@smartapproval.com",
+    "password": "hod123",
+    "role": "HOD",
+    "name": "Dr.eswaramoorthy"
+  },
+  {
+    "id": "u4",
+    "username": "affairs@smartapproval.com",
+    "password": "aff123",
+    "role": "STUDENT_AFFAIRS",
+    "name": "Student Affairs"
+  },
+  {
+    "id": "u5",
+    "username": "admin@smartapproval.com",
+    "password": "admin123",
+    "role": "ADMIN",
+    "name": "System Admin"
+  },
+  {
+    "id": "u6",
+    "name": "raaghav",
+    "username": "raaghav.ct23@bitsathy.ac.in",
+    "role": "STUDENT",
+    "password": "rag123"
+  },
+  {
+    "id": "u7",
+    "username": "ram@smartapproval.com",
+    "password": "ram123",
+    "role": "STUDENT",
+    "name": "ramanan"
+  }
+]

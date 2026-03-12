@@ -1,0 +1,17 @@
+{
+  "title": "Tech Symposium OD",
+  "description": "Participating in national tech symposium.",
+  "requestType": "od",
+  "priority": "HIGH",
+  "studentRegistrationNumber": "21BCE1234",
+  "fromDate": "2026-03-20",
+  "fromTime": "09:00",
+  "toDate": "2026-03-21",
+  "toTime": "17:00",
+  "eventType": "Technical Event",
+  "eventId": "TECH-2024",
+  "needsFacultyApproval": true,
+  "needsHodApproval": true,
+  "needsOdApproval": true,
+  "selectedFacultyId": "u2"
+}

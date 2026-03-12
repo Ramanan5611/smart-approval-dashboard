@@ -1,0 +1,5 @@
+{
+  "name": "Smart Approval Dashboard",
+  "description": "A multi-role approval workflow system with AI-powered policy compliance analysis using the Gemini API.",
+  "requestFramePermissions": []
+}

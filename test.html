@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Page</title>
+    <script src="https://cdn.tailwindcss.com/3.4.1"></script>
+</head>
+<body class="bg-slate-50 p-8">
+    <h1 class="text-2xl font-bold">Test Page</h1>
+    <p>If you can see this, the server is working.</p>
+    <p>Current time: <span id="time"></span></p>
+    <script>
+        document.getElementById('time').textContent = new Date().toLocaleString();
+        setInterval(() => {
+            document.getElementById('time').textContent = new Date().toLocaleString();
+        }, 1000);
+    </script>
+</body>
+</html>

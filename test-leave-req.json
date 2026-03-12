@@ -1,0 +1,14 @@
+{
+  "title": "Medical Leave Request",
+  "description": "Fever and cold. Need 2 days leave.",
+  "requestType": "leave",
+  "priority": "HIGH",
+  "studentRegistrationNumber": "21BCE1234",
+  "fromDate": "2026-03-15",
+  "fromTime": "09:00",
+  "toDate": "2026-03-16",
+  "toTime": "17:00",
+  "needsFacultyApproval": true,
+  "needsLeaveApproval": true,
+  "selectedFacultyId": "u2"
+}
