@@ -37,8 +37,8 @@ const Login: React.FC<Props> = ({ onLogin }) => {
         const user = await apiService.login(username, password);
         onLogin(user);
       }
-    } catch (err) {
-      setError(isRegister ? 'Registration failed' : 'Invalid credentials');
+    } catch (err: any) {
+      setError(err.message || (isRegister ? 'Registration failed' : 'Invalid credentials'));
     }
   };
 
