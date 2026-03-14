@@ -24,10 +24,12 @@ const Login: React.FC<Props> = ({ onLogin }) => {
     e.preventDefault();
     setError('');
 
+    /* 
     if (!validateEmail(username)) {
       setError('Please enter a valid official email address.');
       return;
     }
+    */
 
     try {
       if (isRegister) {
@@ -113,7 +115,7 @@ const Login: React.FC<Props> = ({ onLogin }) => {
           )}
 
           <div className="space-y-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Official Identifier</label>
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Username</label>
             <div className="relative group">
               <div className="absolute left-4 top-1/2 -translate-y-1/2 p-1.5 bg-slate-100 text-slate-400 rounded-lg group-focus-within:bg-blue-50 group-focus-within:text-blue-500 transition-colors">
                 <UserIcon size={16} />
@@ -121,7 +123,7 @@ const Login: React.FC<Props> = ({ onLogin }) => {
               <input
                 type="text"
                 className="w-full pl-14 pr-5 py-4 bg-white/50 backdrop-blur-sm border border-white/80 rounded-2xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500/50 outline-none transition-all font-bold placeholder:text-slate-300 shadow-inner"
-                placeholder="mail@bitsathy.ac.in"
+                placeholder="Ex. admin_system"
                 value={username}
                 onChange={e => setUsername(e.target.value)}
                 required
@@ -130,7 +132,7 @@ const Login: React.FC<Props> = ({ onLogin }) => {
           </div>
 
           <div className="space-y-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Access Token</label>
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Password</label>
             <div className="relative group">
               <div className="absolute left-4 top-1/2 -translate-y-1/2 p-1.5 bg-slate-100 text-slate-400 rounded-lg group-focus-within:bg-blue-50 group-focus-within:text-blue-500 transition-colors">
                 <Lock size={16} />
