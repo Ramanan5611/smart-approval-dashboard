@@ -1,4 +1,5 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
@@ -42,87 +43,156 @@ app.use((req, res, next) => {
   next();
 });
 
-// ─── Persistent storage helpers ───────────────────────────────────────────────
-const DATA_DIR = path.join(__dirname, 'data');
-const USERS_FILE = path.join(DATA_DIR, 'users.json');
-const LOGS_FILE = path.join(DATA_DIR, 'activity_logs.json');
-
-// In-memory stores
+// In-memory security caches (Not persistent)
 const otps = new Map();
 const resetTokens = new Map(); // token -> { userId, expires }
 
-const DEFAULT_USERS = [
-  { id: 'u1', username: 'student@smartapproval.com', password: 'stud123', role: 'STUDENT', name: 'Alice Student' },
-  { id: 'u2', username: 'faculty@smartapproval.com',  password: 'fac123',  role: 'FACULTY', name: 'Dr. Smith (Advisor)' },
-  { id: 'u3', username: 'hod@smartapproval.com',     password: 'hod123',  role: 'HOD',     name: 'Prof. Jones (HOD)' },
-  { id: 'u4', username: 'affairs@smartapproval.com',     password: 'aff123',  role: 'STUDENT_AFFAIRS', name: 'Student Affairs' },
-  { id: 'u5', username: 'admin@smartapproval.com', password: 'admin123',role: 'ADMIN',   name: 'System Admin' }
-];
-
-// Ensure the data directory exists
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-}
-
-// Load users from disk (fallback to defaults)
-const loadUsers = () => {
+// MongoDB connection
+const connectDB = async () => {
   try {
-    if (fs.existsSync(USERS_FILE)) {
-      const raw = fs.readFileSync(USERS_FILE, 'utf8');
-      return JSON.parse(raw);
-    }
-  } catch (err) {
-    console.error('Failed to load users.json, using defaults:', err.message);
-  }
-  // First run: seed the file with defaults
-  if (typeof saveUsers === 'function') {
-    saveUsers(DEFAULT_USERS);
-  } else {
-    fs.writeFileSync(USERS_FILE, JSON.stringify(DEFAULT_USERS, null, 2));
-  }
-  return [...DEFAULT_USERS];
-};
-
-const saveUsers = (usersData) => {
-  try {
-    fs.writeFileSync(USERS_FILE, JSON.stringify(usersData, null, 2));
-  } catch (err) {
-    console.error('Failed to save users.json:', err.message);
+    const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/smart-approval-dashboard';
+    await mongoose.connect(uri, {
+      dbName: 'smart-approval-dashboard'
+    });
+    console.log('MongoDB Connected successfully to:', mongoose.connection.host);
+  } catch (error) {
+    console.error('MongoDB connection error:', error.message);
+    // Don't exit process in serverless environments like Vercel
   }
 };
 
-// Load logs from disk
-const loadLogs = () => {
-  try {
-    if (fs.existsSync(LOGS_FILE)) {
-      return JSON.parse(fs.readFileSync(LOGS_FILE, 'utf8'));
-    }
-  } catch (err) {
-    console.error('Failed to load logs:', err.message);
-  }
-  return [];
+// ─── Mongoose Schemas & Models ──────────────────────────────────────────────
+const UserSchema = new mongoose.Schema({
+  username: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
+  role: { type: String, required: true, enum: ['STUDENT', 'FACULTY', 'HOD', 'STUDENT_AFFAIRS', 'ADMIN'] },
+  name: { type: String, required: true }
+}, { timestamps: true });
+
+// Case-insensitive lookup helper
+UserSchema.statics.findByUsername = function(username) {
+  return this.findOne({ username: new RegExp(`^${username}$`, 'i') });
 };
 
-// Log activity helper
-const logActivity = (userId, type, details) => {
+// Professional Security: Password Hashing Middleware
+UserSchema.pre('save', async function(next) {
+  if (!this.isModified('password')) return next();
   try {
-    const logs = loadLogs();
-    const newLog = {
-      id: `log-${Date.now()}`,
-      userId,
-      timestamp: new Date().toISOString(),
-      type,
-      details
-    };
-    logs.unshift(newLog);
-    // Keep only last 1000 logs
-    fs.writeFileSync(LOGS_FILE, JSON.stringify(logs.slice(0, 1000), null, 2));
+    const salt = await bcrypt.genSalt(10);
+    this.password = await bcrypt.hash(this.password, salt);
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
+const User = mongoose.model('User', UserSchema);
+
+const ActivityLogSchema = new mongoose.Schema({
+  userId: { type: String, required: true },
+  type: { type: String, required: true },
+  timestamp: { type: Date, default: Date.now },
+  details: mongoose.Schema.Types.Mixed
+});
+
+const ActivityLog = mongoose.model('ActivityLog', ActivityLogSchema);
+
+const RequestSchema = new mongoose.Schema({
+  studentId: { type: String, required: true },
+  studentName: { type: String, required: true },
+  title: { type: String, required: true },
+  description: { type: String, required: true },
+  requestType: { type: String, required: true },
+  priority: { type: String },
+  studentIdNumber: { type: String },
+  currentStage: { type: String, required: true },
+  status: { type: String, default: 'PENDING' },
+  documents: Array,
+  logs: Array,
+  // Other dynamic fields from the form
+  studentRegistrationNumber: String,
+  email: String,
+  phone: String,
+  mailIdReason: String,
+  additionalNotes: String,
+  eventType: String,
+  eventId: String,
+  eventStatusImageUrl: String,
+  fromDate: String,
+  fromTime: String,
+  toDate: String,
+  toTime: String,
+  enteredMailId: String,
+  selectedFacultyId: String
+}, { timestamps: true });
+
+const Request = mongoose.model('Request', RequestSchema);
+
+const AppointmentSchema = new mongoose.Schema({
+  studentId: { type: String, required: true },
+  studentName: { type: String, required: true },
+  facultyId: String,
+  facultyName: String,
+  hodId: String,
+  hodName: String,
+  deanId: String,
+  deanName: String,
+  date: { type: String, required: true },
+  time: { type: String, required: true },
+  duration: String,
+  purpose: { type: String, required: true },
+  status: { type: String, default: 'PENDING' },
+  meetingType: String,
+  location: String,
+  videoLink: String,
+  createdAt: { type: Date, default: Date.now }
+});
+
+const Appointment = mongoose.model('Appointment', AppointmentSchema);
+
+// Log activity helper (Updated for MongoDB)
+const logActivity = async (userId, type, details) => {
+  try {
+    const newLog = new ActivityLog({ userId, type, details });
+    await newLog.save();
     return newLog;
   } catch (err) {
     console.error('Log failed:', err);
   }
 };
 // ──────────────────────────────────────────────────────────────────────────────
+
+// Seed initial data if DB is empty
+const seedUsers = async () => {
+  try {
+    const count = await User.countDocuments();
+    if (count === 0) {
+      console.log('Database empty. Seeding default users...');
+      const defaults = [
+        { username: 'student@smartapproval.com', password: 'stud123', role: 'STUDENT', name: 'Alice Student' },
+        { username: 'faculty@smartapproval.com',  password: 'fac123',  role: 'FACULTY', name: 'Dr. Smith (Advisor)' },
+        { username: 'hod@smartapproval.com',     password: 'hod123',  role: 'HOD',     name: 'Prof. Jones (HOD)' },
+        { username: 'affairs@smartapproval.com',     password: 'aff123',  role: 'STUDENT_AFFAIRS', name: 'Student Affairs' },
+        { username: 'admin@smartapproval.com', password: 'admin123',role: 'ADMIN',   name: 'System Admin' }
+      ];
+      await User.insertMany(defaults);
+      console.log('✅ Default users seeded successfully');
+    }
+  } catch (err) {
+    console.error('Seed failed:', err.message);
+  }
+};
+
+// Start server helper
+const startServer = async () => {
+  await connectDB();
+  await seedUsers();
+  
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server is running on port ${PORT}`);
+    console.log(`Local: http://localhost:${PORT}`);
+  });
+};
 
 // File upload configuration
 const storage = multer.memoryStorage();
@@ -142,59 +212,23 @@ const upload = multer({
   }
 });
 
-// In-memory data store (for demo without MongoDB)
-let appointments = [];
-
-// Role limits configuration
+// Role limits configuration (Used during registration)
 const ROLE_LIMITS = {
-  'STUDENT': Infinity, // Unlimited students
+  'STUDENT': Infinity,
   'FACULTY': 5,
   'HOD': 3,
   'STUDENT_AFFAIRS': 2,
   'ADMIN': 1
 };
 
-// Load users from persistent storage
-let users = loadUsers();
-
-let requests = [
-  {
-    id: 'req-101',
-    studentId: 'u1',
-    studentName: 'Alice Student',
-    title: 'Research Grant for AI Project',
-    description: 'Requesting $500 for cloud GPU credits to train a neural network model for the senior thesis project.',
-    currentStage: 'FACULTY_REVIEW',
-    status: 'PENDING',
-    createdAt: new Date().toISOString(),
-    logs: [
-      { date: new Date().toISOString(), actorName: 'Alice Student', action: 'Submitted Request' }
-    ]
-  },
-  {
-    id: 'req-102',
-    studentId: 'u1',
-    studentName: 'Alice Student',
-    title: 'Conference Travel Approval',
-    description: 'Permission to travel to NYC for the Tech 2024 conference.',
-    currentStage: 'COMPLETED',
-    status: 'APPROVED',
-    createdAt: new Date(Date.now() - 86400000 * 5).toISOString(),
-    logs: [
-      { date: new Date(Date.now() - 86400000 * 5).toISOString(), actorName: 'Alice Student', action: 'Submitted Request' },
-      { date: new Date(Date.now() - 86400000 * 4).toISOString(), actorName: 'Dr. Smith', action: 'Approved (Faculty)' },
-      { date: new Date(Date.now() - 86400000 * 3).toISOString(), actorName: 'Prof. Jones', action: 'Approved (HOD)' },
-      { date: new Date(Date.now() - 86400000 * 2).toISOString(), actorName: 'Dean Williams', action: 'Final Approval' },
-    ]
-  }
-];
+// Requests (REPLACED BY MONGODB)
 
 // Helper functions
 const generateToken = (userId) => {
   return jwt.sign({ userId }, process.env.JWT_SECRET || 'fallback-secret', { expiresIn: '24h' });
 };
 
-const authenticateToken = (req, res, next) => {
+const authenticateToken = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
@@ -202,7 +236,7 @@ const authenticateToken = (req, res, next) => {
     return res.status(401).json({ message: 'Access token required' });
   }
 
-  jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret', (err, decoded) => {
+  jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret', async (err, decoded) => {
     if (err) {
       return res.status(403).json({ message: 'Invalid token' });
     }
@@ -218,8 +252,18 @@ const comparePassword = async (plainPassword, hashedPassword) => {
 // Routes
 
 // Health check
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
+app.get('/api/health', async (req, res) => {
+  try {
+    const userCount = await User.countDocuments();
+    res.json({ 
+      status: 'OK', 
+      db: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
+      users: userCount,
+      timestamp: new Date().toISOString() 
+    });
+  } catch (error) {
+    res.status(500).json({ status: 'Error', message: error.message });
+  }
 });
 
 // Auth routes
@@ -231,28 +275,13 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(400).json({ message: 'Username and password are required' });
     }
 
-    const user = users.find(u => u.username.toLowerCase() === username.toLowerCase());
+    const user = await User.findByUsername(username);
     if (!user) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    // For demo, we'll use plain text comparison since we have pre-hashed passwords
-    // For newly registered users, we'll compare plain text
-    let isMatch = false;
-    if (user.password.startsWith('$2a$')) {
-      // Pre-hashed user - use bcrypt comparison (simplified for demo)
-      const plainPasswords = {
-        'student_user': 'stud123',
-        'faculty_adv': 'fac123',
-        'hod_dept': 'hod123',
-        'stud_aff': 'aff123',
-        'admin_system': 'admin123'
-      };
-      isMatch = plainPasswords[username] === password;
-    } else {
-      // Newly registered user - plain text comparison
-      isMatch = user.password === password;
-    }
+    // Professional Security: Bcrypt comparison
+    const isMatch = await bcrypt.compare(password, user.password);
 
     if (!isMatch) {
       return res.status(401).json({ message: 'Invalid credentials' });
@@ -261,11 +290,11 @@ app.post('/api/auth/login', async (req, res) => {
     // Generate OTP for login (Professional Expansion)
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
     const expires = Date.now() + 10 * 60 * 1000; // 10 minutes
-    otps.set(user.id, { code: otpCode, expires });
+    otps.set(user._id.toString(), { code: otpCode, expires });
 
     const mailOptions = {
       from: `"Smart Approval System" <${process.env.SMTP_USER}>`,
-      to: username,
+      to: user.username,
       subject: 'Security Code - Smart Approval Dashboard',
       html: `
       <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #eee; border-radius: 12px; background-color: #ffffff;">
@@ -293,12 +322,12 @@ app.post('/api/auth/login', async (req, res) => {
       }
     });
 
-    logActivity(user.id, 'AUTH_LOGIN_ATTEMPT', { status: 'OTP_SENT', username });
+    logActivity(user._id.toString(), 'AUTH_LOGIN_ATTEMPT', { status: 'OTP_SENT', username: user.username });
 
     res.json({
       message: 'OTP sent to your email',
       requiresOtp: true,
-      userId: user.id
+      userId: user._id.toString()
     });
   } catch (error) {
     console.error('Login error:', error);
@@ -324,16 +353,19 @@ app.post('/api/auth/verify-otp', async (req, res) => {
       return res.status(401).json({ message: 'Invalid verification code.' });
     }
 
-    const user = users.find(u => u.id === userId);
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
     otps.delete(userId);
 
-    const token = generateToken(user.id);
-    logActivity(user.id, 'AUTH_LOGIN_SUCCESS', { method: 'OTP' });
+    const token = generateToken(user._id.toString());
+    logActivity(user._id.toString(), 'AUTH_LOGIN_SUCCESS', { method: 'OTP' });
 
     res.json({
       token,
       user: {
-        id: user.id,
+        id: user._id.toString(),
         username: user.username,
         role: user.role,
         name: user.name
@@ -359,7 +391,7 @@ app.post('/api/auth/register', async (req, res) => {
     }
 
     // Check role limits
-    const currentCount = users.filter(u => u.role === role).length;
+    const currentCount = await User.countDocuments({ role });
     const limit = ROLE_LIMITS[role];
 
     if (currentCount >= limit) {
@@ -368,23 +400,20 @@ app.post('/api/auth/register', async (req, res) => {
       });
     }
 
-    const existingUser = users.find(u => u.username === username);
+    const existingUser = await User.findOne({ username: new RegExp(`^${username}$`, 'i') });
     if (existingUser) {
       return res.status(400).json({ message: 'Username already exists' });
     }
 
-    // For demo, we'll use plain text password comparison
-    // In production, you'd hash the password properly
-    const user = { id: `u${users.length + 1}`, username, password, role, name };
-    users.push(user);
-    saveUsers(users); // persist to disk
+    const user = new User({ username, password, role, name });
+    await user.save();
 
-    const token = generateToken(user.id);
+    const token = generateToken(user._id.toString());
 
     res.status(201).json({
       token,
       user: {
-        id: user.id,
+        id: user._id.toString(),
         username: user.username,
         role: user.role,
         name: user.name
@@ -405,20 +434,20 @@ app.post('/api/auth/forgot-password', async (req, res) => {
       return res.status(400).json({ message: 'Username/Email is required' });
     }
 
-    const user = users.find(u => u.username.toLowerCase() === username.toLowerCase());
+    const user = await User.findByUsername(username);
 
     if (!user) {
       console.log(`Password reset attempt for non-existent user: ${username}`);
-      logActivity('SYSTEM', 'AUTH_RESET_FAILED', { info: 'User not found', attemptedIdentifier: username });
+      await logActivity('SYSTEM', 'AUTH_RESET_FAILED', { info: 'User not found', attemptedIdentifier: username });
       return res.status(404).json({ message: `Identifier "${username}" not found in system.` });
     }
 
     const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-    resetTokens.set(token, { userId: user.id, expires: Date.now() + 3600000 }); // 1 hour
+    resetTokens.set(token, { userId: user._id.toString(), expires: Date.now() + 3600000 }); // 1 hour
 
     const mailOptions = {
       from: `"Smart Approval System" <${process.env.SMTP_USER}>`,
-      to: username,
+      to: user.username,
       subject: 'Password Recovery Token - Smart Approval Dashboard',
       html: `
       <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 25px; border: 1px solid #f1f5f9; border-radius: 16px; background-color: #ffffff; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">
@@ -439,7 +468,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
     };
 
     await transporter.sendMail(mailOptions);
-    logActivity(user.id, 'AUTH_RESET_REQUESTED', { username });
+    await logActivity(user._id.toString(), 'AUTH_RESET_REQUESTED', { username: user.username });
 
     res.json({ message: 'Recovery token successfully dispatched to your email.' });
   } catch (error) {
@@ -457,17 +486,17 @@ app.post('/api/auth/reset-password', async (req, res) => {
       return res.status(400).json({ message: 'Invalid or expired reset token' });
     }
 
-    const userIndex = users.findIndex(u => u.id === resetData.userId);
-    if (userIndex === -1) {
+    const user = await User.findById(resetData.userId);
+    if (!user) {
       return res.status(404).json({ message: 'User no longer exists' });
     }
 
     // Update password
-    users[userIndex].password = newPassword;
-    saveUsers(users);
+    user.password = newPassword;
+    await user.save();
     resetTokens.delete(token);
 
-    logActivity(resetData.userId, 'AUTH_RESET_SUCCESS', {});
+    await logActivity(resetData.userId, 'AUTH_RESET_SUCCESS', {});
 
     res.json({ message: 'Password reset successful. You can now login.' });
   } catch (error) {
@@ -478,9 +507,9 @@ app.post('/api/auth/reset-password', async (req, res) => {
 
 app.get('/api/approvers', authenticateToken, async (req, res) => {
   try {
-    const approvers = users
-      .filter(u => u.role === 'FACULTY' || u.role === 'HOD')
-      .map(({ password, ...user }) => user);
+    const approvers = await User.find({
+      role: { $in: ['FACULTY', 'HOD'] }
+    }).select('-password');
     res.json(approvers);
   } catch (error) {
     console.error('Get approvers error:', error);
@@ -491,11 +520,11 @@ app.get('/api/approvers', authenticateToken, async (req, res) => {
 // Admin-only endpoint to get activity logs
 app.get('/api/logs', authenticateToken, async (req, res) => {
   try {
-    const user = users.find(u => u.id === req.userId);
+    const user = await User.findById(req.userId);
     if (!user || user.role !== 'ADMIN') {
       return res.status(403).json({ message: 'Admin access required' });
     }
-    const logs = loadLogs();
+    const logs = await ActivityLog.find().sort({ timestamp: -1 }).limit(1000);
     res.json(logs);
   } catch (error) {
     console.error('Get logs error:', error);
@@ -506,19 +535,14 @@ app.get('/api/logs', authenticateToken, async (req, res) => {
 // Admin-only endpoint to get all users
 app.get('/api/users', authenticateToken, async (req, res) => {
   try {
-    const user = users.find(u => u.id === req.userId);
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    // Only admin can access user list
-    if (user.role !== 'ADMIN') {
+    const user = await User.findById(req.userId);
+    if (!user || user.role !== 'ADMIN') {
       return res.status(403).json({ message: 'Admin access required' });
     }
 
     // Return users without passwords
-    const safeUsers = users.map(({ password, ...user }) => user);
-    res.json(safeUsers);
+    const allUsers = await User.find().select('-password');
+    res.json(allUsers);
   } catch (error) {
     console.error('Get users error:', error);
     res.status(500).json({ message: 'Server error' });
@@ -528,13 +552,8 @@ app.get('/api/users', authenticateToken, async (req, res) => {
 // Admin-only endpoint to create user
 app.post('/api/users', authenticateToken, async (req, res) => {
   try {
-    const adminUser = users.find(u => u.id === req.userId);
-    if (!adminUser) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    // Only admin can create users
-    if (adminUser.role !== 'ADMIN') {
+    const adminUser = await User.findById(req.userId);
+    if (!adminUser || adminUser.role !== 'ADMIN') {
       return res.status(403).json({ message: 'Admin access required' });
     }
 
@@ -544,47 +563,29 @@ app.post('/api/users', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'All fields are required' });
     }
 
-    // Check if role is valid
+    // Role validation
     if (!['STUDENT', 'FACULTY', 'HOD', 'STUDENT_AFFAIRS', 'ADMIN'].includes(role)) {
       return res.status(400).json({ message: 'Invalid role specified' });
     }
 
-    // Check role limits
-    const currentCount = users.filter(u => u.role === role).length;
+    // Role limits check
+    const currentCount = await User.countDocuments({ role });
     const limit = ROLE_LIMITS[role];
-
     if (currentCount >= limit) {
-      return res.status(400).json({
-        message: `Cannot create more ${role.toLowerCase()} accounts. Maximum limit: ${limit}`
-      });
+      return res.status(400).json({ message: `Limit reached for ${role}` });
     }
 
-    const existingUser = users.find(u => u.username === username);
+    const existingUser = await User.findOne({ username: new RegExp(`^${username}$`, 'i') });
     if (existingUser) {
       return res.status(400).json({ message: 'Username already exists' });
     }
 
-    if (password.length < 6) {
-      return res.status(400).json({ message: 'Password must be at least 6 characters long' });
-    }
+    const newUser = new User({ name, username, role, password });
+    await newUser.save();
 
-    // Create new user
-    const newUser = {
-      id: `u${users.length + 1}`,
-      name,
-      username,
-      role,
-      password // In production, you'd hash this
-    };
-
-    users.push(newUser);
-    saveUsers(users); // persist to disk
-
-    // Return user without password
-    const { password: _, ...safeUser } = newUser;
-    res.status(201).json(safeUser);
+    res.status(201).json({ id: newUser._id.toString(), name: newUser.name, username: newUser.username, role: newUser.role });
   } catch (error) {
-    console.error('Create user error:', error);
+    console.error('Admin Create user error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -592,40 +593,19 @@ app.post('/api/users', authenticateToken, async (req, res) => {
 // Appointment endpoints
 app.get('/api/appointments', authenticateToken, async (req, res) => {
   try {
-    const user = users.find(u => u.id === req.userId);
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
 
-    let filteredAppointments = appointments;
-
-    // Filter appointments based on user role
+    let query = {};
     switch (user.role) {
-      case 'STUDENT':
-        // Students can only see their own appointments
-        filteredAppointments = appointments.filter(apt => apt.studentId === user.id);
-        break;
-      case 'FACULTY':
-        // Faculty can see appointments where they are the assigned faculty
-        filteredAppointments = appointments.filter(apt => apt.facultyId === user.id);
-        break;
-      case 'HOD':
-        // HODs can see appointments where they are the assigned HOD
-        filteredAppointments = appointments.filter(apt => apt.hodId === user.id);
-        break;
-      case 'STUDENT_AFFAIRS':
-        // Deans can see appointments where they are the assigned dean
-        filteredAppointments = appointments.filter(apt => apt.deanId === user.id);
-        break;
-      case 'ADMIN':
-        // Admins can see all appointments
-        filteredAppointments = appointments;
-        break;
-      default:
-        filteredAppointments = [];
+      case 'STUDENT': query = { studentId: user._id.toString() }; break;
+      case 'FACULTY': query = { facultyId: user._id.toString() }; break;
+      case 'HOD': query = { hodId: user._id.toString() }; break;
+      case 'STUDENT_AFFAIRS': query = { deanId: user._id.toString() }; break;
     }
 
-    res.json(filteredAppointments);
+    const data = await Appointment.find(query).sort({ createdAt: -1 });
+    res.json(data);
   } catch (error) {
     console.error('Get appointments error:', error);
     res.status(500).json({ message: 'Server error' });
@@ -634,65 +614,35 @@ app.get('/api/appointments', authenticateToken, async (req, res) => {
 
 app.post('/api/appointments', authenticateToken, async (req, res) => {
   try {
-    const user = users.find(u => u.id === req.userId);
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    // Only students can create appointments
-    if (user.role !== 'STUDENT') {
+    const user = await User.findById(req.userId);
+    if (!user || user.role !== 'STUDENT') {
       return res.status(403).json({ message: 'Only students can book appointments' });
     }
 
     const { facultyId, hodId, deanId, date, time, duration, purpose, meetingType, location, videoLink } = req.body;
 
-    if (!facultyId || !date || !time || !purpose) {
-      return res.status(400).json({ message: 'Faculty, date, time, and purpose are required' });
-    }
+    const faculty = await User.findById(facultyId);
+    if (!faculty) return res.status(400).json({ message: 'Invalid faculty' });
 
-    // Validate faculty exists
-    const faculty = users.find(u => u.id === facultyId);
-    if (!faculty || faculty.role !== 'FACULTY') {
-      return res.status(400).json({ message: 'Invalid faculty selected' });
-    }
-
-    // Validate optional participants
-    if (hodId) {
-      const hod = users.find(u => u.id === hodId);
-      if (!hod || hod.role !== 'HOD') {
-        return res.status(400).json({ message: 'Invalid HOD selected' });
-      }
-    }
-
-    if (deanId) {
-      const dean = users.find(u => u.id === deanId);
-      if (!dean || dean.role !== 'STUDENT_AFFAIRS') {
-        return res.status(400).json({ message: 'Invalid Dean selected' });
-      }
-    }
-
-    const newAppointment = {
-      id: `appt${Date.now()}`,
-      studentId: user.id,
+    const newAppointment = new Appointment({
+      studentId: user._id.toString(),
       studentName: user.name,
       facultyId,
       facultyName: faculty.name,
-      hodId: hodId || undefined,
-      hodName: hodId ? users.find(u => u.id === hodId)?.name : undefined,
-      deanId: deanId || undefined,
-      deanName: deanId ? users.find(u => u.id === deanId)?.name : undefined,
+      hodId,
+      hodName: hodId ? (await User.findById(hodId))?.name : undefined,
+      deanId,
+      deanName: deanId ? (await User.findById(deanId))?.name : undefined,
       date,
       time,
-      duration: duration || '30',
+      duration,
       purpose,
-      status: 'PENDING',
-      meetingType: meetingType || 'IN_PERSON',
-      location: meetingType === 'IN_PERSON' ? location : undefined,
-      videoLink: meetingType === 'VIDEO_CALL' ? videoLink : undefined,
-      createdAt: new Date().toISOString()
-    };
+      meetingType,
+      location,
+      videoLink
+    });
 
-    appointments.push(newAppointment);
+    await newAppointment.save();
     res.status(201).json(newAppointment);
   } catch (error) {
     console.error('Create appointment error:', error);
@@ -703,45 +653,14 @@ app.post('/api/appointments', authenticateToken, async (req, res) => {
 // Admin-only endpoint to update user
 app.put('/api/users/:id', authenticateToken, async (req, res) => {
   try {
-    const adminUser = users.find(u => u.id === req.userId);
-    if (!adminUser) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    // Only admin can update users
-    if (adminUser.role !== 'ADMIN') {
-      return res.status(403).json({ message: 'Admin access required' });
-    }
+    const adminUser = await User.findById(req.userId);
+    if (!adminUser || adminUser.role !== 'ADMIN') return res.status(403).json({ message: 'Admin only' });
 
     const { id } = req.params;
     const { name, username, role } = req.body;
 
-    const userIndex = users.findIndex(u => u.id === id);
-    if (userIndex === -1) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    const targetUser = users[userIndex];
-
-    // Prevent role changes for security
-    if (role && role !== targetUser.role) {
-      return res.status(403).json({ message: 'Role changes are not allowed for security reasons' });
-    }
-
-    // Update user (don't allow password changes here)
-    const updatedUser = {
-      ...targetUser,
-      name: name || targetUser.name,
-      username: username || targetUser.username,
-      role: targetUser.role // Keep original role
-    };
-
-    users[userIndex] = updatedUser;
-    saveUsers(users); // persist to disk
-
-    // Return user without password
-    const { password, ...safeUser } = updatedUser;
-    res.json(safeUser);
+    const updatedUser = await User.findByIdAndUpdate(id, { name, username, role }, { new: true });
+    res.json(updatedUser);
   } catch (error) {
     console.error('Update user error:', error);
     res.status(500).json({ message: 'Server error' });
@@ -751,32 +670,17 @@ app.put('/api/users/:id', authenticateToken, async (req, res) => {
 // Admin-only endpoint to reset user password
 app.post('/api/users/:id/reset-password', authenticateToken, async (req, res) => {
   try {
-    const adminUser = users.find(u => u.id === req.userId);
-    if (!adminUser) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    // Only admin can reset passwords
-    if (adminUser.role !== 'ADMIN') {
-      return res.status(403).json({ message: 'Admin access required' });
-    }
+    const adminUser = await User.findById(req.userId);
+    if (!adminUser || adminUser.role !== 'ADMIN') return res.status(403).json({ message: 'Admin only' });
 
     const { id } = req.params;
     const { newPassword } = req.body;
 
-    if (!newPassword || newPassword.length < 6) {
-      return res.status(400).json({ message: 'Password must be at least 6 characters long' });
-    }
+    const targetUser = await User.findById(id);
+    if (!targetUser) return res.status(404).json({ message: 'User not found' });
 
-    const userIndex = users.findIndex(u => u.id === id);
-    if (userIndex === -1) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    // Update password (in production, you'd hash this)
-    users[userIndex].password = newPassword;
-    saveUsers(users); // persist to disk
-
+    targetUser.password = newPassword;
+    await targetUser.save();
     res.json({ message: 'Password reset successfully' });
   } catch (error) {
     console.error('Reset password error:', error);
@@ -787,34 +691,13 @@ app.post('/api/users/:id/reset-password', authenticateToken, async (req, res) =>
 // Admin-only endpoint to delete user
 app.delete('/api/users/:id', authenticateToken, async (req, res) => {
   try {
-    const adminUser = users.find(u => u.id === req.userId);
-    if (!adminUser) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    if (adminUser.role !== 'ADMIN') {
-      return res.status(403).json({ message: 'Admin access required' });
-    }
+    const adminUser = await User.findById(req.userId);
+    if (!adminUser || adminUser.role !== 'ADMIN') return res.status(403).json({ message: 'Admin only' });
 
     const { id } = req.params;
+    if (id === adminUser._id.toString()) return res.status(400).json({ message: 'Cannot delete self' });
 
-    // Prevent deleting the admin account itself
-    if (id === adminUser.id) {
-      return res.status(400).json({ message: 'Cannot delete your own admin account' });
-    }
-
-    const userIndex = users.findIndex(u => u.id === id);
-    if (userIndex === -1) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    // Prevent deleting other admin accounts
-    if (users[userIndex].role === 'ADMIN') {
-      return res.status(400).json({ message: 'Cannot delete an admin account' });
-    }
-
-    users.splice(userIndex, 1);
-    saveUsers(users); // persist to disk
+    await User.findByIdAndDelete(id);
     res.json({ message: 'User deleted successfully' });
   } catch (error) {
     console.error('Delete user error:', error);
@@ -825,35 +708,19 @@ app.delete('/api/users/:id', authenticateToken, async (req, res) => {
 // Request routes
 app.get('/api/requests', authenticateToken, async (req, res) => {
   try {
-    const user = users.find(u => u.id === req.userId);
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
 
-    let filteredRequests;
+    let query = {};
     switch (user.role) {
-      case 'STUDENT':
-        filteredRequests = requests.filter(r => r.studentId === user.id);
-        break;
-      case 'FACULTY':
-        filteredRequests = requests.filter(r => r.currentStage === 'FACULTY_REVIEW' && r.status === 'PENDING');
-        break;
-      case 'HOD':
-        filteredRequests = requests.filter(r => r.currentStage === 'HOD_REVIEW' && r.status === 'PENDING');
-        break;
-      case 'STUDENT_AFFAIRS':
-        // Student Affairs sees requests pending their approval stage (including Dean approval for OD/Leave)
-        filteredRequests = requests.filter(r =>
-          (r.currentStage === 'STUDENT_AFFAIRS_APPROVAL' || r.currentStage === 'DEAN_APPROVAL') && r.status === 'PENDING'
-        );
-        break;
-      case 'ADMIN':
-        filteredRequests = requests;
-        break;
-      default:
-        filteredRequests = [];
+      case 'STUDENT': query = { studentId: user._id.toString() }; break;
+      case 'FACULTY': query = { currentStage: 'FACULTY_REVIEW', status: 'PENDING' }; break;
+      case 'HOD': query = { currentStage: 'HOD_REVIEW', status: 'PENDING' }; break;
+      case 'STUDENT_AFFAIRS': query = { $or: [{ currentStage: 'STUDENT_AFFAIRS_APPROVAL' }, { currentStage: 'DEAN_APPROVAL' }], status: 'PENDING' }; break;
+      case 'ADMIN': query = {}; break; // See all
     }
 
+    const filteredRequests = await Request.find(query).sort({ createdAt: -1 });
     res.json(filteredRequests);
   } catch (error) {
     console.error('Get requests error:', error);
@@ -863,210 +730,101 @@ app.get('/api/requests', authenticateToken, async (req, res) => {
 
 app.post('/api/requests', authenticateToken, upload.array('documents', 5), async (req, res) => {
   try {
-    const user = users.find(u => u.id === req.userId);
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    if (user.role !== 'STUDENT') {
+    const user = await User.findById(req.userId);
+    if (!user || user.role !== 'STUDENT') {
       return res.status(403).json({ message: 'Only students can create requests' });
     }
 
     const {
-      title,
-      description,
-      requestType,
-      priority,
-      studentIdNumber,
-      needsFacultyApproval,
-      needsHodApproval,
-      needsOdApproval,
-      needsLeaveApproval,
-      needsMailIdUnblock,
-      email,
-      phone,
-      mailIdReason,
-      additionalNotes,
-      eventType,
-      eventId,
-      studentRegistrationNumber,
-      eventStatusImageUrl,
-      fromDate,
-      fromTime,
-      toDate,
-      toTime,
-      enteredMailId,
-      selectedFacultyId
+      title, description, requestType, priority, studentIdNumber,
+      needsFacultyApproval, needsHodApproval, needsOdApproval, needsLeaveApproval,
+      needsMailIdUnblock, email, phone, mailIdReason, additionalNotes,
+      eventType, eventId, studentRegistrationNumber, eventStatusImageUrl,
+      fromDate, fromTime, toDate, toTime, enteredMailId, selectedFacultyId
     } = req.body;
 
-    if (!title || !description) {
-      return res.status(400).json({ message: 'Title and description are required' });
-    }
+    if (!title || !description) return res.status(400).json({ message: 'Missing fields' });
 
-    // Process uploaded files
-    const documents = [];
-    if (req.files && req.files.length > 0) {
-      req.files.forEach((file) => {
-        documents.push({
-          name: file.originalname,
-          size: file.size,
-          type: file.mimetype,
-          uploadedAt: new Date().toISOString()
-        });
-      });
-    }
+    const documents = (req.files || []).map(file => ({
+      name: file.originalname, size: file.size, type: file.mimetype, uploadedAt: new Date().toISOString()
+    }));
 
-    const newRequest = {
-      id: `req-${Date.now()}`,
-      studentId: user.id,
-      studentName: user.name,
-      title,
-      description,
-      requestType,
-      priority,
-      studentIdNumber,
-      needsFacultyApproval,
-      needsHodApproval,
-      needsOdApproval,
-      needsLeaveApproval,
-      needsMailIdUnblock,
-      email,
-      phone,
-      mailIdReason,
-      additionalNotes,
-      eventType,
-      eventId,
-      studentRegistrationNumber,
-      eventStatusImageUrl,
-      fromDate,
-      fromTime,
-      toDate,
-      toTime,
-      enteredMailId,
-      selectedFacultyId,
+    const newRequest = new Request({
+      studentId: user._id.toString(), studentName: user.name,
+      title, description, requestType, priority, studentIdNumber,
+      needsFacultyApproval, needsHodApproval, needsOdApproval, needsLeaveApproval, needsMailIdUnblock,
+      email, phone, mailIdReason, additionalNotes, eventType, eventId, studentRegistrationNumber, eventStatusImageUrl,
+      fromDate, fromTime, toDate, toTime, enteredMailId, selectedFacultyId,
       currentStage: requestType === 'mailid' ? 'STUDENT_AFFAIRS_APPROVAL' : 'FACULTY_REVIEW',
       status: 'PENDING',
-      createdAt: new Date().toISOString(),
-      documents: documents,
-      logs: [{
-        date: new Date().toISOString(),
-        actorName: user.name,
-        action: 'Submitted Request'
-      }]
-    };
+      documents,
+      logs: [{ date: new Date().toISOString(), actorName: user.name, action: 'Submitted Request' }]
+    });
 
-    requests.unshift(newRequest);
+    await newRequest.save();
 
-    // Send email notification to selected faculty/HOD
     if (selectedFacultyId) {
-      const faculty = users.find(u => u.id === selectedFacultyId);
-      if (faculty && faculty.username) {
-        const mailOptions = {
+      const faculty = await User.findById(selectedFacultyId);
+      if (faculty?.username) {
+        await transporter.sendMail({
           from: `"Smart Approval System" <${process.env.SMTP_USER}>`,
           to: faculty.username,
           subject: `Action Required: New Request from ${user.name}`,
-          text: `Hello ${faculty.name},
-          
-A new ${requestType.toUpperCase()} request has been submitted by student ${user.name} (${user.username}) and is waiting for your approval.
-
-Request Details:
-- Title: ${title}
-- Description: ${description}
-- Registration Number: ${studentRegistrationNumber || 'N/A'}
-- Priority: ${priority || 'NORMAL'}
-
-Please log in to the Smart Approval Dashboard to review and act on this request.
-
-Regards,
-Academic Workflow System`
-        };
-
-        transporter.sendMail(mailOptions).then(info => {
-          console.log('Faculty notification email sent successfully:', info.response);
-        }).catch(err => {
-          console.error('Failed to send faculty notification email:', err);
-        });
+          text: `A new ${requestType.toUpperCase()} request has been submitted by ${user.name}.`
+        }).catch(e => console.error('Failed to notify faculty:', e.message));
       }
     }
 
     res.status(201).json(newRequest);
   } catch (error) {
     console.error('Create request error:', error);
-    if (error.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({ message: 'File size too large. Maximum size is 10MB per file.' });
-    }
-    if (error.message.includes('Invalid file type')) {
-      return res.status(400).json({ message: error.message });
-    }
     res.status(500).json({ message: 'Server error' });
   }
 });
 
 app.put('/api/requests/:id', authenticateToken, async (req, res) => {
   try {
-    const user = users.find(u => u.id === req.userId);
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
 
     const { action, comment } = req.body;
-    const requestId = req.params.id;
+    const request = await Request.findById(req.params.id);
+    if (!request) return res.status(404).json({ message: 'Request not found' });
 
-    if (!action || !['approve', 'reject'].includes(action)) {
-      return res.status(400).json({ message: 'Action must be approve or reject' });
-    }
-
-    const request = requests.find(r => r.id === requestId);
-    if (!request) {
-      return res.status(404).json({ message: 'Request not found' });
-    }
-
-    // MAIL ID UNBLOCK: goes directly to Student Affairs — Faculty/HOD cannot act on it
     const isMailId = request.requestType === 'mailid';
+    const canAct = (user.role === 'STUDENT_AFFAIRS') || (user.role === 'ADMIN') || 
+                   (!isMailId && user.role === 'FACULTY' && request.currentStage === 'FACULTY_REVIEW') ||
+                   (!isMailId && user.role === 'HOD' && request.currentStage === 'HOD_REVIEW');
 
-    const canAct =
-      (user.role === 'STUDENT_AFFAIRS') || // Student Affairs handles everything (including mailid)
-      (user.role === 'ADMIN') ||           // Admin can act on everything
-      (!isMailId && user.role === 'FACULTY' && request.currentStage === 'FACULTY_REVIEW') ||
-      (!isMailId && user.role === 'HOD' && request.currentStage === 'HOD_REVIEW');
-
-    if (!canAct) {
-      return res.status(403).json({ message: 'You do not have permission to act on this request' });
-    }
+    if (!canAct) return res.status(403).json({ message: 'No permission' });
 
     let nextStage = request.currentStage;
     let nextStatus = 'PENDING';
 
     if (action === 'approve') {
       if (user.role === 'STUDENT_AFFAIRS' || user.role === 'ADMIN') {
-        // Dean/Admin can give final approval directly
-        nextStage = 'COMPLETED';
-        nextStatus = 'APPROVED';
+        nextStage = 'COMPLETED'; nextStatus = 'APPROVED';
       } else if (request.currentStage === 'FACULTY_REVIEW') {
         nextStage = 'HOD_REVIEW';
       } else if (request.currentStage === 'HOD_REVIEW') {
         nextStage = 'DEAN_APPROVAL';
       } else if (request.currentStage === 'DEAN_APPROVAL') {
-        nextStage = 'COMPLETED';
-        nextStatus = 'APPROVED';
+        nextStage = 'COMPLETED'; nextStatus = 'APPROVED';
       }
     } else {
-      // Reject
-      nextStage = 'COMPLETED';
-      nextStatus = 'REJECTED';
+      nextStage = 'COMPLETED'; nextStatus = 'REJECTED';
     }
-
-    const log = {
-      date: new Date().toISOString(),
-      actorName: user.name,
-      action: `${action === 'approve' ? 'Approved' : 'Rejected'} (${user.role}${(user.role === 'STUDENT_AFFAIRS' || user.role === 'ADMIN') ? ' - Override' : ''})`,
-      comment
-    };
 
     request.currentStage = nextStage;
     request.status = nextStatus;
-    request.logs.push(log);
+    request.logs.push({
+      date: new Date().toISOString(),
+      actorName: user.name,
+      action: `${action === 'approve' ? 'Approved' : 'Rejected'} (${user.role})`,
+      comment
+    });
 
+    await request.save();
     res.json(request);
   } catch (error) {
     console.error('Update request error:', error);
@@ -1077,45 +835,24 @@ app.put('/api/requests/:id', authenticateToken, async (req, res) => {
 // Database Introspection endpoints
 app.get('/api/database/collections', authenticateToken, async (req, res) => {
   try {
-    const user = users.find(u => u.id === req.userId);
-    if (!user || user.role !== 'ADMIN') {
-      return res.status(403).json({ message: 'Admin access required' });
-    }
-    // Return the available "collections" (our in-memory arrays)
-    res.json(['users', 'requests', 'appointments']);
+    const user = await User.findById(req.userId);
+    if (!user || user.role !== 'ADMIN') return res.status(403).json({ message: 'Admin only' });
+    const collections = await mongoose.connection.db.listCollections().toArray();
+    res.json(collections.map(c => c.name));
   } catch (error) {
-    console.error('Get collections error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
 app.get('/api/database/collections/:collectionName', authenticateToken, async (req, res) => {
   try {
-    const user = users.find(u => u.id === req.userId);
-    if (!user || user.role !== 'ADMIN') {
-      return res.status(403).json({ message: 'Admin access required' });
-    }
+    const user = await User.findById(req.userId);
+    if (!user || user.role !== 'ADMIN') return res.status(403).json({ message: 'Admin only' });
 
     const { collectionName } = req.params;
-    let data = [];
-
-    switch (collectionName) {
-      case 'users':
-        data = users.map(({ password, ...u }) => u); // omit passwords
-        break;
-      case 'requests':
-        data = requests;
-        break;
-      case 'appointments':
-        data = appointments;
-        break;
-      default:
-        return res.status(404).json({ message: 'Collection not found' });
-    }
-
+    const data = await mongoose.connection.db.collection(collectionName).find().toArray();
     res.json(data);
   } catch (error) {
-    console.error('Get collection data error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -1127,21 +864,6 @@ app.use((err, req, res, next) => {
 });
 
 // Start server
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server is running on port ${PORT}`);
-  console.log(`Local: http://localhost:${PORT}`);
-  console.log(`Network: http://10.40.40.99:${PORT}`);
-  console.log(`API endpoints:`);
-  console.log(`  - POST /api/auth/login`);
-  console.log(`  - GET /api/requests`);
-  console.log(`  - POST /api/requests`);
-  console.log(`  - PUT /api/requests/:id`);
-  console.log(`\nDemo credentials:`);
-  console.log(`  student_user / stud123`);
-  console.log(`  faculty_adv / fac123`);
-  console.log(`  hod_dept / hod123`);
-  console.log(`  stud_aff / aff123`);
-  console.log(`  admin_system / admin123`);
-});
+startServer();
 
 export default app;
