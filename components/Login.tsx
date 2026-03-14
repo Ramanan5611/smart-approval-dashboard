@@ -106,10 +106,9 @@ const Login: React.FC<Props> = ({ onLogin }) => {
                 required
               >
                 <option value="STUDENT">Student Learner</option>
-                <option value="FACULTY">Faculty Advisor</option>
-                <option value="HOD">Dept. Authority</option>
-                <option value="STUDENT_AFFAIRS">Student Relations</option>
-                <option value="ADMIN">System Architect</option>
+                <option value="FACULTY">Faculty Adviser</option>
+                <option value="HOD">Dept. HOD</option>
+                <option value="STUDENT_AFFAIRS">Student Affairs</option>
               </select>
             </div>
           )}
