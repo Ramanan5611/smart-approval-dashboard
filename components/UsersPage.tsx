@@ -6,7 +6,7 @@ import AddUserModal from './AddUserModal';
 import SettingsPage from './SettingsPage';
 import SkeletonTable from './SkeletonTable';
 import toast from 'react-hot-toast';
-import { Users, Search, Filter, Mail, Shield, Calendar, Trash2, Edit, UserPlus, Database, Layers, ChevronLeft, ChevronRight, Settings } from 'lucide-react';
+import { Users, Search, Filter, Mail, Shield, Calendar, Trash2, Edit, UserPlus, Database, Layers, ChevronLeft, ChevronRight, Settings, Menu, X } from 'lucide-react';
 
 interface Props {
   user: User;
@@ -24,6 +24,7 @@ const UsersPage: React.FC<Props> = ({ user, onLogout, onBack }) => {
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Database Viewer State
   // Database Viewer State
@@ -330,9 +331,26 @@ const UsersPage: React.FC<Props> = ({ user, onLogout, onBack }) => {
   const totalUserPages = Math.ceil(filteredUsers.length / itemsPerPage);
 
   return (
-    <div className="min-h-screen flex bg-slate-900 gradient-mesh overflow-hidden">
+    <div className="min-h-screen flex bg-slate-900 gradient-mesh overflow-hidden relative">
+      {/* Mobile Hamburger */}
+      <button 
+        onClick={() => setIsMobileMenuOpen(true)}
+        className="lg:hidden fixed top-4 left-4 z-30 p-2 bg-slate-900 text-white rounded-lg shadow-lg border border-slate-800"
+      >
+        <Menu size={24} />
+      </button>
+
       {/* Sidebar */}
-      <aside className="w-64 bg-slate-900 text-white flex flex-col fixed h-full z-20 shadow-2xl">
+      <aside className={`w-64 bg-slate-900 text-white flex flex-col fixed h-full z-40 shadow-2xl transition-transform duration-300 transform 
+        ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
+        
+        {/* Mobile Close Button */}
+        <button 
+          onClick={() => setIsMobileMenuOpen(false)}
+          className="lg:hidden absolute top-4 right-4 text-slate-400 hover:text-white"
+        >
+          <X size={24} />
+        </button>
         <div className="p-6 border-b border-slate-800/50">
           <div className="flex items-center gap-3">
             <div className="relative">
@@ -398,15 +416,21 @@ const UsersPage: React.FC<Props> = ({ user, onLogout, onBack }) => {
         </div>
 
         <div className="p-6 border-t border-slate-700 flex flex-col gap-4">
+          {onBack && (
+            <button onClick={onBack} className="flex items-center gap-2 text-blue-400 hover:text-blue-300 transition-colors font-bold uppercase text-xs tracking-widest">
+              <ChevronLeft size={18} />
+              <span>Back to Dashboard</span>
+            </button>
+          )}
           <button onClick={onLogout} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors">
-            <ChevronLeft size={18} />
+            <Shield size={18} />
             <span>Sign Out</span>
           </button>
         </div>
       </aside>
 
       {/* Main Content */}
-      <main className="ml-64 flex-1 p-8">
+      <main className="lg:ml-64 flex-1 p-4 lg:p-8">
         {/* Header */}
         <header className="mb-8">
           <div className="flex justify-between items-center">

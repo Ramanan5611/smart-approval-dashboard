@@ -47,5 +47,12 @@
     "password": "ram123",
     "role": "STUDENT",
     "name": "ramanan"
+  },
+  {
+    "id": "u8",
+    "username": "admin_system",
+    "password": "admin123",
+    "role": "STUDENT",
+    "name": "Admin System"
   }
 ]

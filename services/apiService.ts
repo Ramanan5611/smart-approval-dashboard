@@ -53,6 +53,20 @@ class ApiService {
       body: JSON.stringify({ username, password }),
     });
 
+    if (data.requiresOtp) {
+      return data;
+    }
+
+    this.setToken(data.token);
+    return data.user;
+  }
+
+  async verifyOtp(userId: string, code: string) {
+    const data = await this.request('/auth/verify-otp', {
+      method: 'POST',
+      body: JSON.stringify({ userId, code }),
+    });
+
     this.setToken(data.token);
     return data.user;
   }
@@ -144,6 +158,24 @@ class ApiService {
 
   async getCollectionData(collectionName: string): Promise<any[]> {
     return this.request(`/database/collections/${collectionName}`);
+  }
+
+  async getActivityLogs(): Promise<any[]> {
+    return this.request('/logs');
+  }
+
+  async forgotPassword(username: string): Promise<{ message: string }> {
+    return this.request('/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ username }),
+    });
+  }
+
+  async resetPassword(token: string, newPassword: string): Promise<{ message: string }> {
+    return this.request('/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ token, newPassword }),
+    });
   }
 }
 

@@ -4,6 +4,7 @@ import { apiService, API_BASE_URL } from '../services/apiService';
 import RequestModal from './RequestModal';
 import AppointmentBooking from './AppointmentBooking';
 import FacultyAppointments from './FacultyAppointments';
+import AdminActivityLogs from './AdminActivityLogs';
 import RequestSelection from './RequestSelection';
 import SettingsPage from './SettingsPage';
 import LeaveApprovalForm from './forms/LeaveApprovalForm';
@@ -11,7 +12,7 @@ import OdApprovalForm from './forms/OdApprovalForm';
 import MailIdUnblockForm from './forms/MailIdUnblockForm';
 import SkeletonTable from './SkeletonTable';
 import toast from 'react-hot-toast';
-import { Plus, Search, FileText, CheckCircle, Clock, Ban, LogOut, Upload, X, Users, Calendar, Bell, Settings, RefreshCw, TrendingUp, Activity, Home, User as UserIcon } from 'lucide-react';
+import { Plus, Search, FileText, CheckCircle, Clock, Ban, LogOut, Upload, X, Users, Calendar, Bell, Settings, RefreshCw, TrendingUp, Activity, Home, Menu, User as UserIcon, ChevronRight } from 'lucide-react';
 
 // Type definitions for file handling
 interface FileList {
@@ -40,7 +41,8 @@ const Dashboard: React.FC<Props> = ({ user, onLogout, onShowUsersPage }) => {
   const refreshInterval = useRef<NodeJS.Timeout | null>(null);
 
   // View State for simplified navigation
-  const [activeView, setActiveView] = useState<'dashboard' | 'request-selection' | 'leave-form' | 'od-form' | 'mailid-form' | 'appointments' | 'settings'>('dashboard');
+  const [activeView, setActiveView] = useState<'dashboard' | 'request-selection' | 'leave-form' | 'od-form' | 'mailid-form' | 'appointments' | 'settings' | 'admin-logs'>('dashboard');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -99,12 +101,36 @@ const Dashboard: React.FC<Props> = ({ user, onLogout, onShowUsersPage }) => {
       default: return 'bg-amber-100 text-amber-700 border-amber-200';
     }
   };
+  const MobileRequestCard: React.FC<{ request: RequestItem, onAction: (request: RequestItem) => void }> = ({ request, onAction }) => (
+    <div 
+      onClick={() => onAction(request)}
+      className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm mb-4 active:scale-[0.98] transition-all"
+    >
+      <div className="flex justify-between items-start mb-3">
+        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">#{request.id}</span>
+        <span className={`px-2 py-0.5 text-[10px] font-bold rounded-full border ${getStatusColor(request.status)}`}>
+          {request.status}
+        </span>
+      </div>
+      <h4 className="font-bold text-slate-900 mb-1">{request.title}</h4>
+      <p className="text-sm text-slate-500 mb-4 line-clamp-2">{request.description}</p>
+      
+      <div className="flex items-center justify-between text-xs text-slate-400 pt-3 border-t border-slate-50">
+        <div className="flex items-center gap-2">
+          <Clock size={12} />
+          <span>{new Date(request.createdAt).toLocaleDateString()}</span>
+        </div>
+        <div className="font-bold text-blue-600">View Details</div>
+      </div>
+    </div>
+  );
 
   // Request Table Component for reuse
   const RequestTable: React.FC<{ requests: RequestItem[], user: User, onAction: (request: RequestItem) => void, emptyMessage: string }> = ({ requests, user, onAction, emptyMessage }) => {
     return (
       <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse">
+        {/* Desktop Table */}
+        <table className="hidden lg:table w-full text-left border-collapse">
           <thead>
             <tr className="border-b border-slate-100 text-slate-500 text-xs uppercase bg-slate-50">
               <th className="p-4 font-semibold">ID</th>
@@ -125,7 +151,7 @@ const Dashboard: React.FC<Props> = ({ user, onLogout, onShowUsersPage }) => {
                       <FileText size={28} className="text-slate-300" />
                     </div>
                     <p className="font-medium text-slate-700 text-lg mb-1">{emptyMessage}</p>
-                    <p className="text-sm text-slate-400 max-w-sm mx-auto">We couldn't find any data matching this view. Check back later or adjust your filters.</p>
+                    <p className="text-sm text-slate-400 max-w-sm mx-auto">We couldn't find any data matching this view.</p>
                   </div>
                 </td>
               </tr>
@@ -157,22 +183,24 @@ const Dashboard: React.FC<Props> = ({ user, onLogout, onShowUsersPage }) => {
                   </td>
                   <td className="p-4 text-sm text-slate-600">{new Date(request.createdAt).toLocaleDateString()}</td>
                   <td className="p-4">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedRequest(request);
-                        setIsModalOpen(true);
-                      }}
-                      className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-                    >
-                      View Details
-                    </button>
+                    <button className="text-blue-600 hover:text-blue-800 text-sm font-medium">Details</button>
                   </td>
                 </tr>
               ))
             )}
           </tbody>
         </table>
+
+        {/* Mobile Cards */}
+        <div className="lg:hidden p-4 space-y-4 bg-slate-50/50">
+          {requests.length === 0 ? (
+            <div className="p-8 text-center text-slate-400 text-sm">{emptyMessage}</div>
+          ) : (
+            requests.map(request => (
+              <MobileRequestCard key={request.id} request={request} onAction={onAction} />
+            ))
+          )}
+        </div>
       </div>
     );
   };
@@ -266,8 +294,25 @@ const Dashboard: React.FC<Props> = ({ user, onLogout, onShowUsersPage }) => {
   return (
     <div className="min-h-screen flex bg-slate-50 gradient-mesh overflow-hidden">
 
-      {/* Sidebar */}
-      <aside className="w-64 bg-slate-900 text-white flex flex-col fixed h-full z-20 shadow-2xl">
+      {/* Mobile Hamburger Button */}
+      <button 
+        onClick={() => setIsMobileMenuOpen(true)}
+        className="lg:hidden fixed top-4 left-4 z-30 p-2 bg-slate-900 text-white rounded-lg shadow-lg"
+      >
+        <Menu size={24} />
+      </button>
+
+      {/* Sidebar - Desktop and Mobile Overlay */}
+      <aside className={`w-64 bg-slate-900 text-white flex flex-col fixed h-full z-40 shadow-2xl transition-transform duration-300 transform 
+        ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
+        
+        {/* Mobile Close Button */}
+        <button 
+          onClick={() => setIsMobileMenuOpen(false)}
+          className="lg:hidden absolute top-4 right-4 text-slate-400 hover:text-white"
+        >
+          <X size={24} />
+        </button>
         <div className="p-6 border-b border-slate-800/50">
           <div className="flex items-center gap-3">
             <div className="relative">
@@ -326,13 +371,22 @@ const Dashboard: React.FC<Props> = ({ user, onLogout, onShowUsersPage }) => {
               </button>
             )}
             {user.role === UserRole.ADMIN && onShowUsersPage && (
-              <button
-                onClick={onShowUsersPage}
-                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-800 text-slate-300 rounded-lg transition-colors"
-              >
-                <Users size={18} />
-                <span className="font-medium">User Management</span>
-              </button>
+              <>
+                <button
+                  onClick={onShowUsersPage}
+                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-800 text-slate-300 rounded-lg transition-colors"
+                >
+                  <Users size={18} />
+                  <span className="font-medium">User Management</span>
+                </button>
+                <button
+                  onClick={() => setActiveView('admin-logs')}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border transition-all ${activeView === 'admin-logs' ? 'bg-indigo-600 text-white border-indigo-500 shadow-lg shadow-indigo-500/20' : 'text-slate-400 border-transparent hover:bg-slate-800 hover:text-white'}`}
+                >
+                  <Activity size={18} />
+                  <span className="font-medium">Activity Logs</span>
+                </button>
+              </>
             )}
           </nav>
         </div>
@@ -346,7 +400,44 @@ const Dashboard: React.FC<Props> = ({ user, onLogout, onShowUsersPage }) => {
       </aside>
 
       {/* Main Content */}
-      <main className="ml-64 flex-1 p-8">
+      <main className={`flex-1 min-h-screen transition-all duration-300 ${isMobileMenuOpen ? 'lg:ml-64' : 'lg:ml-64'}`}>
+        
+        {/* Top Navigation Bar */}
+        <div className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-200 px-4 lg:px-8 py-3 flex justify-between items-center shadow-sm">
+          <div className="flex items-center gap-2 text-sm font-medium text-slate-500">
+            <Home size={14} />
+            <ChevronRight size={14} className="opacity-40" />
+            <span className="text-slate-900 capitalize">{activeView.replace(/-/g, ' ')}</span>
+          </div>
+
+          <div className="flex items-center gap-2 lg:gap-4">
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-slate-100 rounded-full text-xs font-bold text-slate-600">
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+              System Live
+            </div>
+            
+            <div className="h-8 w-[1px] bg-slate-200 hidden sm:block"></div>
+
+            <div className="flex items-center gap-3">
+              <button 
+                onClick={() => setShowNotifications(!showNotifications)}
+                className="relative p-2 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors"
+                title="Notifications"
+              >
+                <Bell size={20} />
+                {notifications.length > 0 && (
+                  <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full"></span>
+                )}
+              </button>
+              
+              <div className="h-8 w-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-xs shadow-sm">
+                {user.name.charAt(0)}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-4 lg:p-8">
 
         {/* Header - Only visible on main dashboard */}
         {activeView === 'dashboard' && (
@@ -639,7 +730,10 @@ const Dashboard: React.FC<Props> = ({ user, onLogout, onShowUsersPage }) => {
           ) : (
             <FacultyAppointments user={user} onBack={() => setActiveView('dashboard')} />
           )
+        ) : activeView === 'admin-logs' ? (
+          <AdminActivityLogs onBack={() => setActiveView('dashboard')} />
         ) : null}
+        </div>
       </main>
 
       {/* Detail Modal */}

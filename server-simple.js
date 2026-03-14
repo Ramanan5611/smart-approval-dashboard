@@ -39,6 +39,11 @@ app.use(express.json());
 // ─── Persistent storage helpers ───────────────────────────────────────────────
 const DATA_DIR = path.join(__dirname, 'data');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
+const LOGS_FILE = path.join(DATA_DIR, 'activity_logs.json');
+
+// In-memory stores
+const otps = new Map();
+const resetTokens = new Map(); // token -> { userId, expires }
 
 const DEFAULT_USERS = [
   { id: 'u1', username: 'student@smartapproval.com', password: 'stud123', role: 'STUDENT', name: 'Alice Student' },
@@ -68,12 +73,35 @@ const loadUsers = () => {
   return [...DEFAULT_USERS];
 };
 
-// Write users to disk
-const saveUsers = (data) => {
+// Load logs from disk
+const loadLogs = () => {
   try {
-    fs.writeFileSync(USERS_FILE, JSON.stringify(data, null, 2), 'utf8');
+    if (fs.existsSync(LOGS_FILE)) {
+      return JSON.parse(fs.readFileSync(LOGS_FILE, 'utf8'));
+    }
   } catch (err) {
-    console.error('Failed to save users.json:', err.message);
+    console.error('Failed to load logs:', err.message);
+  }
+  return [];
+};
+
+// Log activity helper
+const logActivity = (userId, type, details) => {
+  try {
+    const logs = loadLogs();
+    const newLog = {
+      id: `log-${Date.now()}`,
+      userId,
+      timestamp: new Date().toISOString(),
+      type,
+      details
+    };
+    logs.unshift(newLog);
+    // Keep only last 1000 logs
+    fs.writeFileSync(LOGS_FILE, JSON.stringify(logs.slice(0, 1000), null, 2));
+    return newLog;
+  } catch (err) {
+    console.error('Log failed:', err);
   }
 };
 // ──────────────────────────────────────────────────────────────────────────────
@@ -212,24 +240,77 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    const token = generateToken(user.id);
+    // Generate OTP for login (Professional Expansion)
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expires = Date.now() + 10 * 60 * 1000; // 10 minutes
+    otps.set(user.id, { code: otpCode, expires });
 
-    // Automatically send confirmation email
     const mailOptions = {
-        from: `"Smart Approval System" <${process.env.SMTP_USER}>`,
-        to: username,
-        subject: 'Login Confirmation – Smart Approval Dashboard',
-        text: `Hello,\n\nThank you for logging into the Smart Approval Dashboard.\n\nYour login was successful. If this was not you, please contact the system administrator immediately.\n\nBest regards,\nSmart Approval System`
+      from: `"Smart Approval System" <${process.env.SMTP_USER}>`,
+      to: username,
+      subject: 'Security Code - Smart Approval Dashboard',
+      html: `
+      <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #eee; border-radius: 12px; background-color: #ffffff;">
+        <div style="text-align: center; margin-bottom: 25px;">
+          <h2 style="color: #2563eb; margin: 0; font-size: 24px;">Smart Approval</h2>
+          <p style="color: #64748b; margin: 5px 0 0; font-size: 14px;">Identity Verification</p>
+        </div>
+        <p style="color: #1e293b; font-size: 16px;">Hello <strong>${user.name}</strong>,</p>
+        <p style="color: #475569; line-height: 1.6;">You requested a login to the Smart Approval Dashboard. Use the verification code below to complete your sign-in:</p>
+        <div style="background: #f1f5f9; padding: 30px; text-align: center; border-radius: 10px; margin: 25px 0;">
+          <span style="font-size: 36px; font-weight: 800; letter-spacing: 8px; color: #0f172a;">${otpCode}</span>
+        </div>
+        <p style="font-size: 14px; color: #64748b; line-height: 1.5;">This code is valid for <strong>10 minutes</strong>. If you didn't attempt to log in, please ignore this email or contact support.</p>
+        <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #f1f5f9; text-align: center;">
+          <p style="font-size: 12px; color: #94a3b8; margin: 0;">&copy; 2026 Smart Approval Systems. All rights reserved.</p>
+        </div>
+      </div>`
     };
 
-    // Send email asynchronously and log outcome
     transporter.sendMail(mailOptions, (error, info) => {
-        if (error) {
-            console.error('Failed to send confirmation email:', error.message);
-        } else {
-            console.log('Confirmation email sent successfully:', info.response);
-        }
+      if (error) {
+        console.error('Failed to send OTP email:', error.message);
+      } else {
+        console.log('OTP sent successfully');
+      }
     });
+
+    logActivity(user.id, 'AUTH_LOGIN_ATTEMPT', { status: 'OTP_SENT', username });
+
+    res.json({
+      message: 'OTP sent to your email',
+      requiresOtp: true,
+      userId: user.id
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+app.post('/api/auth/verify-otp', async (req, res) => {
+  try {
+    const { userId, code } = req.body;
+    const otpData = otps.get(userId);
+
+    if (!otpData) {
+      return res.status(400).json({ message: 'No active session. Please login again.' });
+    }
+
+    if (Date.now() > otpData.expires) {
+      otps.delete(userId);
+      return res.status(400).json({ message: 'Verification code expired.' });
+    }
+
+    if (otpData.code !== code) {
+      return res.status(401).json({ message: 'Invalid verification code.' });
+    }
+
+    const user = users.find(u => u.id === userId);
+    otps.delete(userId);
+
+    const token = generateToken(user.id);
+    logActivity(user.id, 'AUTH_LOGIN_SUCCESS', { method: 'OTP' });
 
     res.json({
       token,
@@ -241,7 +322,7 @@ app.post('/api/auth/login', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('Login error:', error);
+    console.error('OTP Verification error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -297,7 +378,74 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
-// Endpoint for students to fetch faculty and HODs
+// NEW: Forgot Password Route
+app.post('/api/auth/forgot-password', async (req, res) => {
+  try {
+    const { username } = req.body;
+    const user = users.find(u => u.username === username);
+
+    if (!user) {
+      // Don't reveal if user exists for security, but for this demo we'll be helpful
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+    resetTokens.set(token, { userId: user.id, expires: Date.now() + 3600000 }); // 1 hour
+
+    const mailOptions = {
+      from: `"Smart Approval System" <${process.env.SMTP_USER}>`,
+      to: username,
+      subject: 'Password Reset Request',
+      html: `
+      <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #eee; border-radius: 12px;">
+        <h2 style="color: #2563eb;">Password Reset</h2>
+        <p>Hello <strong>${user.name}</strong>,</p>
+        <p>You requested to reset your password. Use the token below to complete the process:</p>
+        <div style="background: #f8fafc; padding: 15px; text-align: center; border-radius: 8px; font-family: monospace; font-size: 18px; font-weight: bold; color: #1e293b; margin: 20px 0;">
+          ${token}
+        </div>
+        <p style="font-size: 14px; color: #64748b;">This token is valid for 1 hour. If you did not request this, please ignore this email.</p>
+      </div>`
+    };
+
+    await transporter.sendMail(mailOptions);
+    logActivity(user.id, 'AUTH_RESET_REQUESTED', { username });
+
+    res.json({ message: 'Reset token sent to email' });
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+app.post('/api/auth/reset-password', async (req, res) => {
+  try {
+    const { token, newPassword } = req.body;
+    const resetData = resetTokens.get(token);
+
+    if (!resetData || Date.now() > resetData.expires) {
+      return res.status(400).json({ message: 'Invalid or expired reset token' });
+    }
+
+    const userIndex = users.findIndex(u => u.id === resetData.userId);
+    if (userIndex === -1) {
+      return res.status(404).json({ message: 'User no longer exists' });
+    }
+
+    // Update password
+    users[userIndex].password = newPassword;
+    saveUsers(users);
+    resetTokens.delete(token);
+
+    logActivity(resetData.userId, 'AUTH_RESET_SUCCESS', {});
+
+    res.json({ message: 'Password reset successful. You can now login.' });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 app.get('/api/approvers', authenticateToken, async (req, res) => {
   try {
     const approvers = users
@@ -306,6 +454,21 @@ app.get('/api/approvers', authenticateToken, async (req, res) => {
     res.json(approvers);
   } catch (error) {
     console.error('Get approvers error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Admin-only endpoint to get activity logs
+app.get('/api/logs', authenticateToken, async (req, res) => {
+  try {
+    const user = users.find(u => u.id === req.userId);
+    if (!user || user.role !== 'ADMIN') {
+      return res.status(403).json({ message: 'Admin access required' });
+    }
+    const logs = loadLogs();
+    res.json(logs);
+  } catch (error) {
+    console.error('Get logs error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });

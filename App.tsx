@@ -49,12 +49,19 @@ const App: React.FC = () => {
     return <Login onLogin={handleLogin} />;
   }
 
-  // Admin users go directly to Database Manager — no dashboard
-  if (user.role === UserRole.ADMIN) {
-    return <UsersPage user={user} onLogout={handleLogout} />;
+  const [isAdminMode, setIsAdminMode] = useState(false);
+
+  if (isAdminMode && user.role === UserRole.ADMIN) {
+    return <UsersPage user={user} onLogout={handleLogout} onBack={() => setIsAdminMode(false)} />;
   }
 
-  return <Dashboard user={user} onLogout={handleLogout} onShowUsersPage={() => {}} />;
+  return (
+    <Dashboard 
+      user={user} 
+      onLogout={handleLogout} 
+      onShowUsersPage={user.role === UserRole.ADMIN ? () => setIsAdminMode(true) : undefined} 
+    />
+  );
 };
 
 export default App;
