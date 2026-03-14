@@ -1,6 +1,7 @@
 import { User, RequestItem, RequestStage, RequestStatus, LogEntry } from '../types';
 
-const rawBaseUrl = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http://localhost:5000');
+const isProd = import.meta.env.PROD || process.env.NODE_ENV === 'production';
+const rawBaseUrl = isProd ? '' : (import.meta.env.VITE_API_URL || 'http://localhost:5000');
 export const API_BASE_URL = rawBaseUrl.endsWith('/api') ? rawBaseUrl : (rawBaseUrl ? `${rawBaseUrl}/api` : '/api');
 
 class ApiService {

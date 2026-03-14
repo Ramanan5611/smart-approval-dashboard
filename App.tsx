@@ -8,6 +8,7 @@ import { apiService } from './services/apiService';
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isAdminMode, setIsAdminMode] = useState(false);
 
   useEffect(() => {
     try {
@@ -48,8 +49,6 @@ const App: React.FC = () => {
   if (!user) {
     return <Login onLogin={handleLogin} />;
   }
-
-  const [isAdminMode, setIsAdminMode] = useState(false);
 
   if (isAdminMode && user.role === UserRole.ADMIN) {
     return <UsersPage user={user} onLogout={handleLogout} onBack={() => setIsAdminMode(false)} />;
