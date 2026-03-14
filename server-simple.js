@@ -36,6 +36,12 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
+// Request Logging Middleware for debugging
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  next();
+});
+
 // ─── Persistent storage helpers ───────────────────────────────────────────────
 const DATA_DIR = path.join(__dirname, 'data');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
@@ -69,8 +75,20 @@ const loadUsers = () => {
     console.error('Failed to load users.json, using defaults:', err.message);
   }
   // First run: seed the file with defaults
-  saveUsers(DEFAULT_USERS);
+  if (typeof saveUsers === 'function') {
+    saveUsers(DEFAULT_USERS);
+  } else {
+    fs.writeFileSync(USERS_FILE, JSON.stringify(DEFAULT_USERS, null, 2));
+  }
   return [...DEFAULT_USERS];
+};
+
+const saveUsers = (usersData) => {
+  try {
+    fs.writeFileSync(USERS_FILE, JSON.stringify(usersData, null, 2));
+  } catch (err) {
+    console.error('Failed to save users.json:', err.message);
+  }
 };
 
 // Load logs from disk
@@ -213,7 +231,7 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(400).json({ message: 'Username and password are required' });
     }
 
-    const user = users.find(u => u.username === username);
+    const user = users.find(u => u.username.toLowerCase() === username.toLowerCase());
     if (!user) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
@@ -382,11 +400,17 @@ app.post('/api/auth/register', async (req, res) => {
 app.post('/api/auth/forgot-password', async (req, res) => {
   try {
     const { username } = req.body;
-    const user = users.find(u => u.username === username);
+    
+    if (!username) {
+      return res.status(400).json({ message: 'Username/Email is required' });
+    }
+
+    const user = users.find(u => u.username.toLowerCase() === username.toLowerCase());
 
     if (!user) {
-      // Don't reveal if user exists for security, but for this demo we'll be helpful
-      return res.status(404).json({ message: 'User not found' });
+      console.log(`Password reset attempt for non-existent user: ${username}`);
+      logActivity('SYSTEM', 'AUTH_RESET_FAILED', { info: 'User not found', attemptedIdentifier: username });
+      return res.status(404).json({ message: `Identifier "${username}" not found in system.` });
     }
 
     const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
@@ -395,26 +419,32 @@ app.post('/api/auth/forgot-password', async (req, res) => {
     const mailOptions = {
       from: `"Smart Approval System" <${process.env.SMTP_USER}>`,
       to: username,
-      subject: 'Password Reset Request',
+      subject: 'Password Recovery Token - Smart Approval Dashboard',
       html: `
-      <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #eee; border-radius: 12px;">
-        <h2 style="color: #2563eb;">Password Reset</h2>
-        <p>Hello <strong>${user.name}</strong>,</p>
-        <p>You requested to reset your password. Use the token below to complete the process:</p>
-        <div style="background: #f8fafc; padding: 15px; text-align: center; border-radius: 8px; font-family: monospace; font-size: 18px; font-weight: bold; color: #1e293b; margin: 20px 0;">
-          ${token}
+      <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 25px; border: 1px solid #f1f5f9; border-radius: 16px; background-color: #ffffff; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">
+        <div style="text-align: center; margin-bottom: 25px;">
+          <h2 style="color: #2563eb; margin: 0; font-size: 24px;">Security Portal</h2>
+          <p style="color: #64748b; margin: 5px 0 0; font-size: 14px;">Password Recovery System</p>
         </div>
-        <p style="font-size: 14px; color: #64748b;">This token is valid for 1 hour. If you did not request this, please ignore this email.</p>
+        <p style="color: #1e293b; font-size: 16px;">Hello <strong>${user.name}</strong>,</p>
+        <p style="color: #475569; line-height: 1.6;">A request was made to access your account via password recovery. Use the secure token below to establish a new password:</p>
+        <div style="background: #f1f5f9; padding: 20px; text-align: center; border-radius: 12px; margin: 25px 0; border: 1px dashed #cbd5e1;">
+          <span style="font-family: monospace; font-size: 24px; font-weight: 800; color: #0f172a; letter-spacing: 2px;">${token}</span>
+        </div>
+        <p style="font-size: 14px; color: #64748b; line-height: 1.5;">This token is valid for <strong>1 hour</strong>. If you did not initiate this request, please ignore this email or notify the system administrator immediately.</p>
+        <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #f1f5f9; text-align: center;">
+          <p style="font-size: 11px; color: #94a3b8; margin: 0;">This is an automated security notification. Do not reply.</p>
+        </div>
       </div>`
     };
 
     await transporter.sendMail(mailOptions);
     logActivity(user.id, 'AUTH_RESET_REQUESTED', { username });
 
-    res.json({ message: 'Reset token sent to email' });
+    res.json({ message: 'Recovery token successfully dispatched to your email.' });
   } catch (error) {
     console.error('Forgot password error:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Internal security gateway error. Please try again later.' });
   }
 });
 

@@ -32,11 +32,22 @@ class ApiService {
       const response = await fetch(url, { ...options, headers });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        const message = errorData.details 
-          ? `${errorData.message}: ${errorData.details}` 
-          : (errorData.message || `HTTP error! status: ${response.status}`);
-        throw new Error(message);
+        let errorMessage = `HTTP error! status: ${response.status}`;
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.message || errorMessage;
+        } catch (jsonErr) {
+          // If body is not JSON, try to get it as text
+          try {
+            const rawText = await response.text();
+            if (rawText && rawText.length < 200) {
+              errorMessage = rawText;
+            }
+          } catch (textErr) {
+            // fallback to original errorMessage
+          }
+        }
+        throw new Error(errorMessage);
       }
 
       return await response.json();
