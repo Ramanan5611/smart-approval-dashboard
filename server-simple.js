@@ -1143,3 +1143,5 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`  stud_aff / aff123`);
   console.log(`  admin_system / admin123`);
 });
+
+export default app;
