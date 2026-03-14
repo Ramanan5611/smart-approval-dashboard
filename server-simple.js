@@ -48,16 +48,17 @@ const otps = new Map();
 const resetTokens = new Map(); // token -> { userId, expires }
 
 // MongoDB connection
-const connectDB = async () => {
+export const connectDB = async () => {
+  if (mongoose.connection.readyState >= 1) return;
   try {
     const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/smart-approval-dashboard';
     await mongoose.connect(uri, {
-      dbName: 'smart-approval-dashboard'
+      dbName: 'smart-approval-dashboard',
+      serverSelectionTimeoutMS: 5000,
     });
     console.log('MongoDB Connected successfully to:', mongoose.connection.host);
   } catch (error) {
     console.error('MongoDB connection error:', error.message);
-    // Don't exit process in serverless environments like Vercel
   }
 };
 
@@ -163,7 +164,7 @@ const logActivity = async (userId, type, details) => {
 // ──────────────────────────────────────────────────────────────────────────────
 
 // Seed initial data if DB is empty
-const seedUsers = async () => {
+export const seedUsers = async () => {
   try {
     const count = await User.countDocuments();
     if (count === 0) {
@@ -184,14 +185,16 @@ const seedUsers = async () => {
 };
 
 // Start server helper
-const startServer = async () => {
+export const startServer = async () => {
   await connectDB();
   await seedUsers();
   
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server is running on port ${PORT}`);
-    console.log(`Local: http://localhost:${PORT}`);
-  });
+  if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Server is running on port ${PORT}`);
+      console.log(`Local: http://localhost:${PORT}`);
+    });
+  }
 };
 
 // File upload configuration

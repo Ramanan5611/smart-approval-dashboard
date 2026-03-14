@@ -1,3 +1,12 @@
-import app from '../server-simple.js';
+import app, { connectDB, seedUsers } from '../server-simple.js';
 
-export default app;
+let isInitialized = false;
+
+export default async (req, res) => {
+  if (!isInitialized) {
+    await connectDB();
+    await seedUsers();
+    isInitialized = true;
+  }
+  return app(req, res);
+};
