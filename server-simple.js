@@ -32,6 +32,8 @@ const transporter = nodemailer.createTransport({
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const DEFAULT_LOCAL_MONGO_URI = 'mongodb://localhost:27017/smart-approval-dashboard';
+const BCRYPT_HASH_PATTERN = /^\$2[aby]\$\d{2}\$/;
 
 // Middleware
 app.use(cors());
@@ -51,7 +53,13 @@ const resetTokens = new Map(); // token -> { userId, expires }
 export const connectDB = async () => {
   if (mongoose.connection.readyState >= 1) return;
   try {
-    const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/smart-approval-dashboard';
+    const isServerlessProd = process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
+    const uri = process.env.MONGODB_URI || (!isServerlessProd ? DEFAULT_LOCAL_MONGO_URI : '');
+
+    if (!uri) {
+      throw new Error('Missing MONGODB_URI for production/serverless deployment');
+    }
+
     await mongoose.connect(uri, {
       dbName: 'smart-approval-dashboard',
       serverSelectionTimeoutMS: 5000,
@@ -59,6 +67,7 @@ export const connectDB = async () => {
     console.log('MongoDB Connected successfully to:', mongoose.connection.host);
   } catch (error) {
     console.error('MongoDB connection error:', error.message);
+    throw error;
   }
 };
 
@@ -169,13 +178,16 @@ export const seedUsers = async () => {
     const count = await User.countDocuments();
     if (count === 0) {
       console.log('Database empty. Seeding default users...');
-      const defaults = [
+      const defaults = await Promise.all([
         { username: 'student@smartapproval.com', password: 'stud123', role: 'STUDENT', name: 'Alice Student' },
-        { username: 'faculty@smartapproval.com',  password: 'fac123',  role: 'FACULTY', name: 'Dr. Smith (Advisor)' },
-        { username: 'hod@smartapproval.com',     password: 'hod123',  role: 'HOD',     name: 'Prof. Jones (HOD)' },
-        { username: 'affairs@smartapproval.com',     password: 'aff123',  role: 'STUDENT_AFFAIRS', name: 'Student Affairs' },
-        { username: 'admin@smartapproval.com', password: 'admin123',role: 'ADMIN',   name: 'System Admin' }
-      ];
+        { username: 'faculty@smartapproval.com', password: 'fac123', role: 'FACULTY', name: 'Dr. Smith (Advisor)' },
+        { username: 'hod@smartapproval.com', password: 'hod123', role: 'HOD', name: 'Prof. Jones (HOD)' },
+        { username: 'affairs@smartapproval.com', password: 'aff123', role: 'STUDENT_AFFAIRS', name: 'Student Affairs' },
+        { username: 'admin@smartapproval.com', password: 'admin123', role: 'ADMIN', name: 'System Admin' }
+      ].map(async (user) => ({
+        ...user,
+        password: await bcrypt.hash(user.password, 10)
+      })));
       await User.insertMany(defaults);
       console.log('✅ Default users seeded successfully');
     }
@@ -186,8 +198,12 @@ export const seedUsers = async () => {
 
 // Start server helper
 export const startServer = async () => {
-  await connectDB();
-  await seedUsers();
+  try {
+    await connectDB();
+    await seedUsers();
+  } catch (error) {
+    console.error('Startup initialization failed:', error.message);
+  }
   
   if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
     app.listen(PORT, '0.0.0.0', () => {
@@ -252,11 +268,51 @@ const comparePassword = async (plainPassword, hashedPassword) => {
   return bcrypt.compare(plainPassword, hashedPassword);
 };
 
+const ensureDatabaseReady = async (res) => {
+  try {
+    await connectDB();
+    return true;
+  } catch (error) {
+    const isConfigError = error.message.includes('Missing MONGODB_URI');
+    res.status(503).json({
+      message: isConfigError
+        ? 'Database is not configured for this deployment. Add MONGODB_URI in your Vercel environment variables.'
+        : 'Database is unavailable right now. Please try again in a moment.'
+    });
+    return false;
+  }
+};
+
 // Routes
+
+app.use('/api', async (req, res, next) => {
+  if (req.path === '/health') {
+    return next();
+  }
+
+  if (!(await ensureDatabaseReady(res))) {
+    return;
+  }
+
+  next();
+});
 
 // Health check
 app.get('/api/health', async (req, res) => {
   try {
+    try {
+      await connectDB();
+    } catch (error) {
+      return res.status(503).json({
+        status: 'Error',
+        db: 'Disconnected',
+        message: error.message.includes('Missing MONGODB_URI')
+          ? 'Database is not configured for this deployment. Add MONGODB_URI in your Vercel environment variables.'
+          : 'Database is unavailable right now.',
+        timestamp: new Date().toISOString()
+      });
+    }
+
     const userCount = await User.countDocuments();
     res.json({ 
       status: 'OK', 
@@ -283,8 +339,17 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    // Professional Security: Bcrypt comparison
-    const isMatch = await bcrypt.compare(password, user.password);
+    let isMatch = false;
+    if (BCRYPT_HASH_PATTERN.test(user.password)) {
+      isMatch = await comparePassword(password, user.password);
+    } else {
+      // Upgrade legacy seeded accounts that were stored before password hashing was enforced.
+      isMatch = password === user.password;
+      if (isMatch) {
+        user.password = password;
+        await user.save();
+      }
+    }
 
     if (!isMatch) {
       return res.status(401).json({ message: 'Invalid credentials' });

@@ -4,9 +4,13 @@ let isInitialized = false;
 
 export default async (req, res) => {
   if (!isInitialized) {
-    await connectDB();
-    await seedUsers();
-    isInitialized = true;
+    try {
+      await connectDB();
+      await seedUsers();
+      isInitialized = true;
+    } catch (error) {
+      console.error('Serverless initialization failed:', error.message);
+    }
   }
   return app(req, res);
 };
